@@ -119,12 +119,14 @@ UPROGS=\
 	$U/_cat\
 	$U/_echo\
 	$U/_forktest\
+	$U/_getreadcount\
 	$U/_grep\
 	$U/_init\
 	$U/_kill\
 	$U/_ln\
 	$U/_ls\
 	$U/_mkdir\
+	$U/_readcounttest\
 	$U/_rm\
 	$U/_sh\
 	$U/_stressfs\

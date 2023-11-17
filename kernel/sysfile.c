@@ -65,9 +65,29 @@ sys_dup(void)
   return fd;
 }
 
+static int readcount;
+static struct spinlock rclock;
+
+void
+initreadcount(void)
+{
+  readcount = 0;
+  initlock(&rclock, "readcount");
+}
+
+uint64
+sys_getreadcount(void)
+{
+  return readcount;
+}
+
 uint64
 sys_read(void)
-{
+{ 
+  acquire(&rclock);
+  readcount++;
+  release(&rclock);
+
   struct file *f;
   int n;
   uint64 p;
@@ -76,6 +96,7 @@ sys_read(void)
   argint(2, &n);
   if(argfd(0, 0, &f) < 0)
     return -1;
+
   return fileread(f, p, n);
 }
 
