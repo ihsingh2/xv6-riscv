@@ -57,7 +57,6 @@ OBJCOPY = $(TOOLPREFIX)objcopy
 OBJDUMP = $(TOOLPREFIX)objdump
 
 # OPTIONS: RR, FCFS, PBS, MLFQ
-# Note - MLFQ works only with CPUS := 1 as of date
 SCHEDULER = RR
 
 CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb -gdwarf-2

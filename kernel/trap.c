@@ -13,6 +13,7 @@ extern char trampoline[], uservec[], userret[];
 
 #ifdef MLFQ
   extern struct proc* Q[NQUEUE][NPROC + 1];
+  extern struct spinlock qlock[NQUEUE];
   extern int timeslice[NQUEUE];
   extern int head[NQUEUE];
   extern int tail[NQUEUE];

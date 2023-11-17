@@ -28,16 +28,19 @@ struct spinlock wait_lock;
 
 #ifdef MLFQ
   struct proc* Q[NQUEUE][NPROC + 1] = { [0 ... NQUEUE - 1] = { [0 ... NPROC] = 0 } };
+  struct spinlock qlock[NQUEUE] = { [0 ... NQUEUE - 1] = {0, "qlock" ,0} };
   int timeslice[NQUEUE] = {1, 3, 9, 15};
   int head[NQUEUE] = {0};
   int tail[NQUEUE] = {0};
 
   void enqueue(struct proc* p)
   {
+    acquire(&qlock[p->queue]);
     Q[p->queue][tail[p->queue]] = p;
     tail[p->queue] = (tail[p->queue] + 1) % (NPROC + 1);
     p->inqueue = 1;
     p->age = ticks;
+    release(&qlock[p->queue]);
   }
 
   void requeue(struct proc* p)
@@ -605,6 +608,7 @@ scheduler(void)
 #elif defined MLFQ
   for (int i = 1; i < NQUEUE; i++)
   {
+    acquire(&qlock[i]);
     int j = head[i];
     while (j < tail[i])
     {
@@ -617,17 +621,21 @@ scheduler(void)
         --(p->queue);
         p->ticks = 0;
         p->timeslice = timeslice[p->queue];
+        release(&qlock[i]);
         enqueue(p);
+        acquire(&qlock[i]);
         j = head[i];
       }
       else
         j = tail[i];
       release(&p->lock);
     }
+    release(&qlock[i]);
   }
 
   for (int i = 0; i < NQUEUE; i++)
   {
+    acquire(&qlock[i]);
     if (head[i] != tail[i])
     {
       p = Q[i][head[i]];
@@ -636,6 +644,7 @@ scheduler(void)
       {
         Q[i][head[i]] = 0;
         head[i] = (head[i] + 1) % (NPROC + 1);
+        release(&qlock[i]);
         p->inqueue = 0;
         p->ticks++;
         p->state = RUNNING;
@@ -644,10 +653,13 @@ scheduler(void)
         c->proc = 0;
       }
       else
-        panic("head not runnable");
+        // this has been noted to happen when a process
+        // has been enqueued but is yet to yield
+        release(&qlock[i]);
       release(&p->lock);
       break;
     }
+    release(&qlock[i]);
   }
 
 #else
