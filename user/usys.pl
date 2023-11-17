@@ -39,3 +39,4 @@ entry("uptime");
 entry("getreadcount");
 entry("sigalarm");
 entry("sigreturn");
+entry("setpriority");

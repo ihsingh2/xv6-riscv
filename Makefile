@@ -56,11 +56,16 @@ LD = $(TOOLPREFIX)ld
 OBJCOPY = $(TOOLPREFIX)objcopy
 OBJDUMP = $(TOOLPREFIX)objdump
 
+# OPTIONS: RR, FCFS, PBS, MLFQ
+# Note - MLFQ works only with CPUS := 1 as of date
+SCHEDULER = RR
+
 CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb -gdwarf-2
 CFLAGS += -MD
 CFLAGS += -mcmodel=medany
 CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax
 CFLAGS += -I.
+CFLAGS += -D $(SCHEDULER)
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 
 # Disable PIE when possible (for Ubuntu 16.10 toolchain)
@@ -130,6 +135,7 @@ UPROGS=\
 	$U/_mkdir\
 	$U/_readcounttest\
 	$U/_rm\
+	$U/_setpriority\
 	$U/_sh\
 	$U/_stressfs\
 	$U/_usertests\

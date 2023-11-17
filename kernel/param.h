@@ -11,3 +11,14 @@
 #define NBUF         (MAXOPBLOCKS*3)  // size of disk block cache
 #define FSSIZE       2000  // size of file system in blocks
 #define MAXPATH      128   // maximum file path name
+
+#ifdef PBS
+  #define DEFAULT_RBI 25
+  #define DEFAULT_SP  50
+  #define MAX_SP      100
+#endif
+
+#ifdef MLFQ
+  #define NQUEUE     4
+  #define STARVELIM  40
+#endif

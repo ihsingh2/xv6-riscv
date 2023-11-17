@@ -110,4 +110,21 @@ struct proc {
   uint64 handler;
   int lastalarm;               // Ticks elapsed since last alarm
   struct trapframe *alarm_tf;  // Trapframe when the alarm fired
+
+  uint ctime;                  // Creation time
+#ifdef PBS
+  uint rtime;                  // Time running since last schedule
+  uint stime;                  // Time spent sleeping since last schedule
+  uint wtime;                  // Time spent in the ready queue
+  uint numsch;                 // Number of times scheduled
+  int rbi;                     // Recent behaviour index
+  uint sp;                     // Static priority
+  uint dp;                     // Dynamic priority
+#elif defined MLFQ
+  int ticks;                   // Number of ticks in the current queue
+  int inqueue;                 // Is it already enqueued in a queue?
+  int queue;                   // Current queue/priority
+  int timeslice;               // Timeslice of the current queue
+  int age;                     // Ticks since last run
+#endif
 };

@@ -26,6 +26,52 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+#ifdef MLFQ
+  struct proc* Q[NQUEUE][NPROC + 1] = { [0 ... NQUEUE - 1] = { [0 ... NPROC] = 0 } };
+  int timeslice[NQUEUE] = {1, 3, 9, 15};
+  int head[NQUEUE] = {0};
+  int tail[NQUEUE] = {0};
+
+  void enqueue(struct proc* p)
+  {
+    Q[p->queue][tail[p->queue]] = p;
+    tail[p->queue] = (tail[p->queue] + 1) % (NPROC + 1);
+    p->inqueue = 1;
+    p->age = ticks;
+  }
+
+  void requeue(struct proc* p)
+  {
+    if (p->inqueue == 0)
+    {
+      if (p->ticks >= p->timeslice)
+      {
+        if (p->queue != NQUEUE - 1)
+          ++(p->queue);
+        p->ticks = 0;
+        p->timeslice = timeslice[p->queue];
+      }
+      enqueue(p);
+    }
+  }
+#endif
+
+#ifdef PBS
+  int min(int num1, int num2)
+  {
+    if (num1 < num2)
+      return num1;
+    return num2;
+  }
+
+  int max(int num1, int num2)
+  {
+    if (num1 > num2)
+      return num1;
+    return num2;
+  }
+#endif
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -147,6 +193,16 @@ found:
   p->context.sp = p->kstack + PGSIZE;
   p->alarmset = 0;
   p->alarm_tf = 0;
+  p->ctime = ticks;
+#ifdef PBS
+  p->rtime = 0;
+  p->stime = 0;
+  p->wtime = 0;
+  p->numsch = 0;
+  p->rbi = DEFAULT_RBI;
+  p->sp = DEFAULT_SP;
+  p->dp = min(p->sp + p->rbi, MAX_SP);
+#endif
 
   return p;
 }
@@ -252,7 +308,12 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
-
+#ifdef MLFQ
+  p->ticks = 0;
+  p->queue = 0;
+  p->timeslice = timeslice[0];
+  enqueue(p);
+#endif
   release(&p->lock);
 }
 
@@ -322,6 +383,12 @@ fork(void)
 
   acquire(&np->lock);
   np->state = RUNNABLE;
+#ifdef MLFQ
+  np->ticks = 0;
+  np->queue = 0;
+  np->timeslice = timeslice[0];
+  enqueue(np);
+#endif
   release(&np->lock);
 
   return pid;
@@ -450,13 +517,17 @@ scheduler(void)
   struct cpu *c = mycpu();
   
   c->proc = 0;
-  for(;;){
+  for(;;)
+  {
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
-    for(p = proc; p < &proc[NPROC]; p++) {
+#ifdef RR
+    for(p = proc; p < &proc[NPROC]; p++)
+    {
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
+      if(p->state == RUNNABLE)
+      {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
@@ -470,6 +541,120 @@ scheduler(void)
       }
       release(&p->lock);
     }
+
+#elif defined FCFS
+    struct proc *selp = 0;
+    for (p = proc; p < &proc[NPROC]; p++)
+      if (p->state == RUNNABLE)
+        if (selp == 0 || selp->ctime > p->ctime)
+          selp = p;
+    if (selp != 0)
+    {
+      acquire(&selp->lock);
+      if (selp->state == RUNNABLE)
+      {
+        selp->state = RUNNING;
+        c->proc = selp;
+        swtch(&c->context, &selp->context);
+        c->proc = 0;
+      }
+      release(&selp->lock);
+    }
+
+#elif defined PBS
+    struct proc *selp = 0;
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+      if (p->state == RUNNABLE)
+      {
+        int temp = (int) (3 * p->rtime) - p->stime - p->wtime;
+        temp *= 50;
+        temp = (int) temp / (int) (p->rtime + p->stime + p->wtime + 1);
+
+        p->rbi = max(temp, 0);
+        p->dp = min(p->sp + p->rbi, MAX_SP);
+
+        if (selp == 0 || p->dp < selp->dp)
+          selp = p;
+        else if (p->dp == selp->dp) {
+          if (p->numsch < selp->numsch)
+            selp = p;
+          else if (p->numsch == selp->numsch) {
+            if (p->ctime < selp->ctime)
+              selp = p;
+          }
+        }
+      }
+    }
+    if (selp != 0)
+    {
+      acquire(&selp->lock);
+      if (selp->state == RUNNABLE)
+      {
+        selp->state = RUNNING;
+        selp->rtime = 0;
+        selp->stime = 0;
+        selp->numsch++;
+        c->proc = selp;
+        swtch(&c->context, &selp->context);
+        c->proc = 0;
+      }
+      release(&selp->lock);
+    }
+
+#elif defined MLFQ
+  for (int i = 1; i < NQUEUE; i++)
+  {
+    int j = head[i];
+    while (j < tail[i])
+    {
+      p = Q[i][j];
+      acquire(&p->lock);
+      if (ticks - p->age >= STARVELIM)
+      {
+        Q[i][head[i]] = 0;
+        head[i] = (head[i] + 1) % (NPROC + 1);
+        --(p->queue);
+        p->ticks = 0;
+        p->timeslice = timeslice[p->queue];
+        enqueue(p);
+        j = head[i];
+      }
+      else
+        j = tail[i];
+      release(&p->lock);
+    }
+  }
+
+  for (int i = 0; i < NQUEUE; i++)
+  {
+    if (head[i] != tail[i])
+    {
+      p = Q[i][head[i]];
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
+      {
+        Q[i][head[i]] = 0;
+        head[i] = (head[i] + 1) % (NPROC + 1);
+        p->inqueue = 0;
+        p->ticks++;
+        p->state = RUNNING;
+        c->proc = p;
+        swtch(&c->context, &p->context);
+        c->proc = 0;
+      }
+      else
+        panic("head not runnable");
+      release(&p->lock);
+      break;
+    }
+  }
+
+#else
+  panic("scheduler not defined\n");
+
+#endif
+
   }
 }
 
@@ -506,8 +691,13 @@ yield(void)
 {
   struct proc *p = myproc();
   acquire(&p->lock);
+#ifndef FCFS
   p->state = RUNNABLE;
+#ifdef MLFQ
+  requeue(p);
+#endif
   sched();
+#endif
   release(&p->lock);
 }
 
@@ -575,6 +765,9 @@ wakeup(void *chan)
       acquire(&p->lock);
       if(p->state == SLEEPING && p->chan == chan) {
         p->state = RUNNABLE;
+#ifdef MLFQ
+        requeue(p);
+#endif
       }
       release(&p->lock);
     }
@@ -596,6 +789,9 @@ kill(int pid)
       if(p->state == SLEEPING){
         // Wake process from sleep().
         p->state = RUNNABLE;
+#ifdef MLFQ
+        requeue(p);
+#endif
       }
       release(&p->lock);
       return 0;
@@ -672,14 +868,62 @@ procdump(void)
   char *state;
 
   printf("\n");
-  for(p = proc; p < &proc[NPROC]; p++){
-    if(p->state == UNUSED)
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    if (p->state == UNUSED)
       continue;
-    if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
+    if (p->state >= 0 && p->state < NELEM(states) && states[p->state])
       state = states[p->state];
     else
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
+#ifdef FCFS
+  printf(" %d", p->ctime);
+#elif defined PBS
+  printf(" %d %d %d %d %d", p->sp, p->rbi, p->dp, p->numsch, p->ctime);
+#elif defined MLFQ
+    printf(" %d %d", p->inqueue, p->queue);
+#endif
     printf("\n");
   }
+
+#ifdef MLFQ
+  for (int i = 0; i < NQUEUE; i++)
+  {
+    printf("QUEUE %d (%d-%d): ", i, head[i], tail[i]);
+    for (int j = 0; j < NPROC + 1; j++) {
+      if (Q[i][j] == 0)
+        printf("- ");
+      else
+        printf("%d ", Q[i][j]->pid);
+    }
+    printf("\n");
+  }
+#endif
+}
+
+void
+update_time(void)
+{
+#ifdef PBS
+  struct proc *p;
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    switch (p->state)
+    {
+      case RUNNING:
+        p->rtime++;
+        break;
+      case SLEEPING:
+        p->stime++;
+        break;
+      case RUNNABLE:
+        p->wtime++;
+        break;
+      default:
+    }
+    release(&p->lock);
+  }
+#endif
 }

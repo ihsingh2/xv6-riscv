@@ -11,6 +11,15 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+#ifdef MLFQ
+  extern struct proc* Q[NQUEUE][NPROC + 1];
+  extern int timeslice[NQUEUE];
+  extern int head[NQUEUE];
+  extern int tail[NQUEUE];
+  extern void enqueue(struct proc* p);
+  extern void requeue(struct proc* p);
+#endif
+
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -95,9 +104,35 @@ usertrap(void)
   if(killed(p))
     exit(-1);
 
-  // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if (which_dev == 2)
+  {
+#ifndef MLFQ
+    // give up the CPU if this is a timer interrupt.
     yield();
+#else
+    if (p->ticks >= p->timeslice)
+    {
+      requeue(p);
+      yield();
+      goto end;
+    }
+
+    p->ticks++;
+    for (int i = 0; i < p->queue; i++)
+    {
+      if (head[i] != tail[i])
+      {
+        if (Q[i][head[i]]->state == RUNNABLE)
+        {
+          enqueue(p);
+          yield();
+          goto end;
+        }
+      }
+    }
+end:
+#endif
+  }
 
   usertrapret();
 }
@@ -184,6 +219,7 @@ clockintr()
 {
   acquire(&tickslock);
   ticks++;
+  update_time();
   wakeup(&ticks);
   release(&tickslock);
 }

@@ -6,6 +6,12 @@
 #include "spinlock.h"
 #include "proc.h"
 
+#ifdef PBS
+  extern struct proc proc[NPROC];
+  extern int min(int num1, int num2);
+  extern int max(int num1, int num2);
+#endif
+
 uint64
 sys_exit(void)
 {
@@ -114,4 +120,37 @@ sys_sigreturn(void)
   p->alarmset = 1;
   p->lastalarm = 0;
   return p->trapframe->a0;
+}
+
+uint64
+sys_setpriority(void)
+{
+  int pid, priority;
+  argint(0, &pid);
+  argint(1, &priority);
+  
+#ifdef PBS
+  struct proc *p;
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    if (p->pid == pid)
+    {
+      uint oldsp = p->sp;
+      uint olddp = p->dp;
+
+      p->sp = priority;
+      p->rtime = 0;
+      p->stime = 0;
+      p->rbi = DEFAULT_RBI;
+      p->dp = min(p->sp + p->rbi, MAX_SP);
+
+      if (p->dp < olddp)
+        yield();
+
+      return oldsp;
+    }
+  }
+#endif
+
+  return -1;
 }

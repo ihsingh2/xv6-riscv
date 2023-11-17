@@ -25,6 +25,7 @@ int uptime(void);
 int getreadcount(void);
 int sigalarm(int, void*);
 int sigreturn(void);
+int setpriority(int, int);
 
 // ulib.c
 int stat(const char*, struct stat*);
